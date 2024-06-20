@@ -42,7 +42,7 @@ LOG_MODULE_REGISTER(persistent_key_usage, LOG_LEVEL_DBG);
 #define SAMPLE_ALG					PSA_ALG_CTR
 #define NRF_CRYPTO_EXAMPLE_PERSISTENT_KEY_MAX_TEXT_SIZE (100)
 
-static psa_key_id_t key_id;
+static psa_key_id_t key_id = SAMPLE_PERS_KEY_ID;
 
 /* Below text is used as plaintext for encryption/decryption */
 static uint8_t m_plain_text[NRF_CRYPTO_EXAMPLE_PERSISTENT_KEY_MAX_TEXT_SIZE] = {
@@ -86,9 +86,9 @@ int crypto_finish(void)
 
 int generate_persistent_key(void)
 {
-	psa_status_t status;
+	psa_status_t status = PSA_ERROR_ALREADY_EXISTS;
 
-	LOG_INF("Generating random persistent AES key...");
+	// LOG_INF("Generating random persistent AES key...");
 
 	/* Configure the key attributes */
 	psa_key_attributes_t key_attributes = PSA_KEY_ATTRIBUTES_INIT;
@@ -100,20 +100,27 @@ int generate_persistent_key(void)
 
 	/* Persistent key specific settings */
 	psa_set_key_lifetime(&key_attributes, PSA_KEY_LIFETIME_PERSISTENT);
-	psa_set_key_id(&key_attributes, SAMPLE_PERS_KEY_ID);
+	psa_set_key_id(&key_attributes, key_id);
 
 	/* Generate a random AES key with persistent lifetime. The key can be used for
 	 * encryption/decryption using the key_id.
 	 */
-	status = psa_generate_key(&key_attributes, &key_id);
-	if (status != PSA_SUCCESS) {
-		LOG_INF("psa_generate_key failed! (Error: %d)", status);
-		return APP_ERROR;
+
+	while (status == PSA_ERROR_ALREADY_EXISTS)
+	{
+		status = psa_generate_key(&key_attributes, &key_id);
+		if (status != PSA_SUCCESS && status != PSA_ERROR_ALREADY_EXISTS) {
+			LOG_INF("psa_generate_key failed! (Error: %d)", status);
+			return APP_ERROR;
+		}
+		key_id++;
+		psa_set_key_id(&key_attributes, key_id);
 	}
 
 	/* Make sure the key is not in memory anymore, has the same affect then resetting the device
 	 */
-	status = psa_purge_key(key_id);
+
+	status = psa_purge_key(key_id - 1);
 	if (status != PSA_SUCCESS) {
 		LOG_INF("psa_purge_key failed! (Error: %d)", status);
 		return APP_ERROR;
@@ -122,7 +129,7 @@ int generate_persistent_key(void)
 	/* After the key handle is acquired the attributes are not needed */
 	psa_reset_key_attributes(&key_attributes);
 
-	LOG_INF("Persistent key generated successfully!");
+	LOG_INF("Persistent key with id: %d generated successfully!", key_id);
 
 	return APP_SUCCESS;
 }
@@ -166,6 +173,14 @@ int use_persistent_key(void)
 	return APP_SUCCESS;
 }
 
+void last_call(){
+	int status = generate_persistent_key();
+	if (status != APP_SUCCESS) {
+		LOG_INF(APP_ERROR_MESSAGE);
+		return;
+	}
+}
+
 int main(void)
 {
 	int status;
@@ -178,23 +193,38 @@ int main(void)
 		return APP_ERROR;
 	}
 
+	volatile int wait = 0;
+	while (wait == 0){
+
+	}
+
 	status = generate_persistent_key();
 	if (status != APP_SUCCESS) {
 		LOG_INF(APP_ERROR_MESSAGE);
 		return APP_ERROR;
 	}
 
-	status = use_persistent_key();
-	if (status != APP_SUCCESS) {
-		LOG_INF(APP_ERROR_MESSAGE);
-		return APP_ERROR;
+	for(int i = 0; i < 6; i++) {
+		status = generate_persistent_key();
+		if (status != APP_SUCCESS) {
+			LOG_INF(APP_ERROR_MESSAGE);
+			return APP_ERROR;
+		}
 	}
 
-	status = crypto_finish();
-	if (status != APP_SUCCESS) {
-		LOG_INF(APP_ERROR_MESSAGE);
-		return APP_ERROR;
-	}
+	last_call();
+
+	// status = use_persistent_key();
+	// if (status != APP_SUCCESS) {
+	// 	LOG_INF(APP_ERROR_MESSAGE);
+	// 	return APP_ERROR;
+	// }
+
+	// status = crypto_finish();
+	// if (status != APP_SUCCESS) {
+	// 	LOG_INF(APP_ERROR_MESSAGE);
+	// 	return APP_ERROR;
+	// }
 
 	LOG_INF(APP_SUCCESS_MESSAGE);
 
